@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "healthcheck": "node ./scripts/healthcheck.mjs",
-    "self:heal": "node ./scripts/self-heal.mjs",
+    "healthcheck": "node scripts/healthcheck.mjs",
+    "self:heal": "node scripts/self-heal.mjs",
     "lint": "echo \"No lint tasks are currently defined\"",
     "format": "echo \"No format tasks are currently defined\"",
     "typecheck": "echo \"No typecheck tasks are currently defined\"",
