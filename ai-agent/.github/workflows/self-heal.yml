@@ -37,15 +37,21 @@ jobs:
       - name: Prepare log directory
         run: mkdir -p logs
 
-      - name: Run pre-heal healthcheck
-        id: pre_healthcheck
-        continue-on-error: true
+      - name: Configure Git user
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Run pre-heal healthcheck
+        id: pre_healthcheck
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node scripts/healthcheck.mjs | tee logs/pre-healthcheck.log
+
       - name: Execute self-heal routine
         id: self_heal
+        if: steps.pre_healthcheck.outcome == 'success' || steps.pre_healthcheck.outcome == 'failure'
         continue-on-error: true
         run: |
           set -o pipefail
@@ -82,3 +88,13 @@ jobs:
           branch: self-heal/${{ github.run_id }}
           commit-message: "chore: apply automated self-heal"
           title: "chore: apply automated self-heal"
+          body: |
+            Automated self-heal workflow detected issues and applied fixes.
+
+            - Pre-heal healthcheck: ${{ steps.pre_healthcheck.outcome }}
+            - Self-heal routine: ${{ steps.self_heal.outcome }}
+            - Post-heal healthcheck: ${{ steps.post_healthcheck.outcome }}
+
+            This PR was created automatically by the Self Heal workflow.
+          labels: automated,self-heal
+          delete-branch: true
