@@ -8,6 +8,7 @@ import json
 import math
 import os
 import uuid
+from importlib import import_module
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -21,23 +22,35 @@ from typing import (
     cast,
 )
 
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover - handled at runtime
-    OpenAI = None  # type: ignore
-
-try:
-    import anthropic
-except ImportError:  # pragma: no cover - handled at runtime
-    anthropic = None  # type: ignore
-
-try:
-    import google.generativeai as genai
-except ImportError:  # pragma: no cover - handled at runtime
-    genai = None  # type: ignore
-
 if TYPE_CHECKING:
     import google.generativeai as genai_module
+
+
+def _optional_import(module_name: str, attribute: str | None = None) -> Any:
+    """Safely imports optional dependencies.
+
+    Args:
+        module_name: Fully qualified module path.
+        attribute: Optional attribute name to extract from the module.
+
+    Returns:
+        Imported module, attribute, or ``None`` if the import fails.
+    """
+
+    try:
+        module = import_module(module_name)
+    except ModuleNotFoundError:  # pragma: no cover - environment dependent
+        return None
+    except Exception:  # pragma: no cover - environment dependent
+        return None
+    if attribute is None:
+        return module
+    return getattr(module, attribute, None)
+
+
+OpenAI = cast(Any, _optional_import("openai", "OpenAI"))
+anthropic = cast(Any, _optional_import("anthropic"))
+genai = cast(Any, _optional_import("google.generativeai"))
 
 
 MAX_EXPRESSION_LENGTH = 256
@@ -48,7 +61,7 @@ class EvaluationError(Exception):
     """Raised when calculator evaluation fails."""
 
 
-class SafeEvaluator(ast.NodeVisitor):
+class SafeEvaluator(ast.NodeVisitor):  # pylint: disable=invalid-name
     """Evaluates arithmetic expressions using a restricted AST visitor."""
 
     allowed_bin_ops = (
@@ -63,9 +76,20 @@ class SafeEvaluator(ast.NodeVisitor):
     allowed_unary_ops = (ast.UAdd, ast.USub)
 
     def __init__(self) -> None:
+        """Initializes a new evaluator instance."""
+
         self._depth = 0
 
     def visit(self, node: ast.AST) -> Any:  # type: ignore[override]
+        """Validates recursion depth and dispatches to typed visitors.
+
+        Args:
+            node: AST node to evaluate.
+
+        Returns:
+            Result returned by the typed visitor.
+        """
+
         self._depth += 1
         if self._depth > MAX_AST_DEPTH:
             raise EvaluationError("Expression too complex")
@@ -78,9 +102,20 @@ class SafeEvaluator(ast.NodeVisitor):
         raise EvaluationError(f"Unsupported expression: {type(node).__name__}")
 
     def visit_Expression(self, node: ast.Expression) -> Any:
+        """Evaluates the body of an expression node."""
+
         return self.visit(node.body)
 
     def visit_BinOp(self, node: ast.BinOp) -> Any:
+        """Handles binary operations using a restricted operator set.
+
+        Args:
+            node: Binary operation node to evaluate.
+
+        Returns:
+            Numerical result of the operation.
+        """
+
         if not isinstance(node.op, self.allowed_bin_ops):
             raise EvaluationError(
                 f"Operator {type(node.op).__name__} not allowed"
@@ -96,6 +131,15 @@ class SafeEvaluator(ast.NodeVisitor):
         return result
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        """Evaluates unary plus and minus expressions.
+
+        Args:
+            node: Unary operation node to evaluate.
+
+        Returns:
+            Signed numerical result.
+        """
+
         if not isinstance(node.op, self.allowed_unary_ops):
             raise EvaluationError(
                 f"Operator {type(node.op).__name__} not allowed"
@@ -105,16 +149,49 @@ class SafeEvaluator(ast.NodeVisitor):
             return +operand
         return -operand
 
-    def visit_Constant(self, node: ast.Constant) -> Any:  # type: ignore[override]
+    def visit_Constant(  # type: ignore[override]
+        self, node: ast.Constant
+    ) -> Any:
+        """Validates numeric constants.
+
+        Args:
+            node: Constant node to evaluate.
+
+        Returns:
+            Numeric value as ``float``.
+        """
+
         if isinstance(node.value, (int, float)):
             return float(node.value)
         raise EvaluationError("Only numbers are allowed")
 
-    def visit_Num(self, node: ast.Num) -> Any:  # type: ignore[override]
+    def visit_Num(  # type: ignore[override]
+        self, node: ast.Num
+    ) -> Any:
+        """Backwards-compatible numeric constant handler.
+
+        Args:
+            node: Legacy ``Num`` node to evaluate.
+
+        Returns:
+            Numeric value as ``float``.
+        """
+
         return self.visit_Constant(node)
 
     @staticmethod
     def _apply_operator(op: ast.AST, left: float, right: float) -> float:
+        """Applies a supported operator to operands.
+
+        Args:
+            op: Operator node.
+            left: Left operand.
+            right: Right operand.
+
+        Returns:
+            Result of the arithmetic operation.
+        """
+
         if isinstance(op, ast.Add):
             return left + right
         if isinstance(op, ast.Sub):
@@ -222,15 +299,15 @@ class LLMClient(Protocol):
         model: str,
     ) -> Any:
         """Creates a model response."""
-        ...
+        raise NotImplementedError("LLM client protocol stub")
 
     def extract_tool_calls(self, response: Any) -> List[Dict[str, Any]]:
         """Extracts tool calls from the response."""
-        ...
+        raise NotImplementedError("LLM client protocol stub")
 
     def get_text(self, response: Any) -> Optional[str]:
         """Extracts primary text content from the response."""
-        ...
+        raise NotImplementedError("LLM client protocol stub")
 
     def append_tool_results(
         self,
@@ -238,7 +315,7 @@ class LLMClient(Protocol):
         calls_and_results: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
         """Appends tool results to the message history."""
-        ...
+        raise NotImplementedError("LLM client protocol stub")
 
 
 class OpenAIClient:
@@ -260,6 +337,19 @@ class OpenAIClient:
         temperature: float,
         model: str,
     ) -> Any:
+        """Calls the OpenAI chat completions API.
+
+        Args:
+            messages: Conversational history without the system message.
+            system: Optional system prompt to prepend.
+            tools: Tool schemas to expose to the model.
+            temperature: Sampling temperature for the request.
+            model: Model identifier to invoke.
+
+        Returns:
+            Provider-specific response object.
+        """
+
         payload_messages = []
         if system:
             payload_messages.append({"role": "system", "content": system})
@@ -287,6 +377,8 @@ class OpenAIClient:
 
     @staticmethod
     def _transform_message(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Transforms an internal message representation for OpenAI."""
+
         payload = {
             "role": message.get("role"),
             "content": message.get("content"),
@@ -310,6 +402,15 @@ class OpenAIClient:
         return payload
 
     def extract_tool_calls(self, response: Any) -> List[Dict[str, Any]]:
+        """Extracts tool invocations from an OpenAI response.
+
+        Args:
+            response: Response returned by :meth:`create`.
+
+        Returns:
+            List of structured tool call dictionaries.
+        """
+
         choice = response.choices[0]
         tool_calls = getattr(choice.message, "tool_calls", None)
         if not tool_calls:
@@ -330,6 +431,8 @@ class OpenAIClient:
         return extracted
 
     def get_text(self, response: Any) -> Optional[str]:
+        """Retrieves primary text output from an OpenAI response."""
+
         message = response.choices[0].message
         content = getattr(message, "content", None)
         if isinstance(content, list):
@@ -346,6 +449,8 @@ class OpenAIClient:
         messages: List[Dict[str, Any]],
         calls_and_results: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
+        """Appends tool outputs in the OpenAI message format."""
+
         for call, result in calls_and_results:
             messages.append(
                 {
@@ -377,6 +482,19 @@ class AnthropicClient:
         temperature: float,
         model: str,
     ) -> Any:
+        """Calls the Anthropic Messages API.
+
+        Args:
+            messages: Conversation history to send.
+            system: Optional system prompt.
+            tools: Tool declarations understood by Anthropic.
+            temperature: Sampling temperature.
+            model: Model identifier.
+
+        Returns:
+            Provider-specific response object.
+        """
+
         converted_messages = [self._convert_message(m) for m in messages]
         return self._client.messages.create(
             model=model,
@@ -396,6 +514,8 @@ class AnthropicClient:
 
     @staticmethod
     def _convert_message(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapts an internal message for the Anthropic API."""
+
         content = message.get("content")
         if isinstance(content, list):
             converted_content = content
@@ -407,6 +527,8 @@ class AnthropicClient:
         return {"role": role, "content": converted_content}
 
     def extract_tool_calls(self, response: Any) -> List[Dict[str, Any]]:
+        """Parses tool invocations from an Anthropic response."""
+
         if response.stop_reason != "tool_use":
             return []
         extracted = []
@@ -422,6 +544,8 @@ class AnthropicClient:
         return extracted
 
     def get_text(self, response: Any) -> Optional[str]:
+        """Collects plain text segments from an Anthropic response."""
+
         texts = [
             block.text
             for block in response.content
@@ -434,6 +558,8 @@ class AnthropicClient:
         messages: List[Dict[str, Any]],
         calls_and_results: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
+        """Appends tool responses so Anthropic can resume the conversation."""
+
         content_blocks = []
         for call, result in calls_and_results:
             content_blocks.append(
@@ -490,11 +616,24 @@ class GeminiClient:
     def create(
         self,
         messages: List[Dict[str, Any]],
-        system: Optional[str],
-        tools: Optional[List[Dict[str, Any]]],
+        _system: Optional[str],
+        _tools: Optional[List[Dict[str, Any]]],
         temperature: float,
         model: str,
     ) -> Any:
+        """Invokes the Gemini model to generate a response.
+
+        Args:
+            messages: Conversation history.
+            _system: Unused; Gemini encodes the system prompt during setup.
+            _tools: Unused; tool schemas are configured during initialization.
+            temperature: Sampling temperature.
+            model: Model identifier.
+
+        Returns:
+            Gemini response object.
+        """
+
         model_instance = self._get_model(model)
         contents = [self._convert_message(m) for m in messages]
         return model_instance.generate_content(
@@ -504,6 +643,8 @@ class GeminiClient:
 
     @staticmethod
     def _convert_message(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Converts an internal message into Gemini's parts format."""
+
         role = message.get("role", "user")
         content = message.get("content")
         if isinstance(content, list):
@@ -515,6 +656,8 @@ class GeminiClient:
         return {"role": role, "parts": parts}
 
     def extract_tool_calls(self, response: Any) -> List[Dict[str, Any]]:
+        """Extracts structured tool calls from a Gemini response."""
+
         candidates = getattr(response, "candidates", None)
         if not candidates:
             return []
@@ -557,6 +700,8 @@ class GeminiClient:
         return extracted
 
     def get_text(self, response: Any) -> Optional[str]:
+        """Aggregates text segments from a Gemini response."""
+
         candidates = getattr(response, "candidates", None)
         if not candidates:
             return None
@@ -579,6 +724,8 @@ class GeminiClient:
         messages: List[Dict[str, Any]],
         calls_and_results: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
+        """Appends tool results in Gemini's expected format."""
+
         parts = []
         for call, result in calls_and_results:
             parts.append(
@@ -769,7 +916,8 @@ def run_agent(
         Final assistant text response.
 
     Raises:
-        RuntimeError: If the loop ends without textual output or exceeds the turn limit.
+        RuntimeError: If the loop ends without textual output or
+            exceeds the turn limit.
     """
 
     calculator = CalculatorTool()
@@ -830,7 +978,7 @@ def _run_demo(provider: str, prompt: str, **kwargs: Any) -> None:
 
     try:
         response = run_agent(prompt, provider=provider, **kwargs)
-    except Exception as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"[{provider}] Error: {exc}")
         return
     print(f"[{provider}] {prompt}\n→ {response}\n")
@@ -885,7 +1033,10 @@ def main() -> None:
     demos = [
         "I have 4 apples. How many do you have?",
         "What is 157.09 * 493.89?",
-        "My brother is twice as old as my mother was when I was born. If my brother is 24 and my mother is 54, how old am I?",
+        (
+            "My brother is twice as old as my mother was when I was born. "
+            "If my brother is 24 and my mother is 54, how old am I?"
+        ),
     ]
     for demo in demos:
         _run_demo(
