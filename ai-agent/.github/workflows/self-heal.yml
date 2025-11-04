@@ -23,6 +23,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
         run: |
@@ -37,12 +38,14 @@ jobs:
 
       - name: Run pre-heal healthcheck
         id: pre_healthcheck
+        continue-on-error: true
         run: |
           set -o pipefail
           node scripts/healthcheck.mjs | tee logs/pre-healthcheck.log
 
       - name: Execute self-heal routine
         id: self_heal
+        continue-on-error: true
         run: |
           set -o pipefail
           node scripts/self-heal.mjs | tee logs/self-heal.log
@@ -53,17 +56,12 @@ jobs:
           set -o pipefail
           node scripts/healthcheck.mjs | tee logs/post-healthcheck.log
 
-      - name: Collect logs
-        if: always()
-        run: |
-          tar -czf self-heal-logs.tar.gz logs
-
       - name: Upload self-heal logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: self-heal-logs
-          path: self-heal-logs.tar.gz
+          path: logs
 
       - name: Detect repository changes
         id: git_status
@@ -78,7 +76,7 @@ jobs:
         if: steps.post_healthcheck.outcome == 'success' && steps.git_status.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SELF_HEAL_PAT }}
           branch: self-heal/${{ github.run_id }}
           commit-message: "chore: apply automated self-heal"
           title: "chore: apply automated self-heal"
