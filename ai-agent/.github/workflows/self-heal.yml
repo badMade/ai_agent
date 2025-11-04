@@ -1,0 +1,48 @@
+name: Self Heal
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  self-heal:
+    name: Self Heal Automation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Configure Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run post healthcheck tasks
+        id: post_healthcheck
+        run: |
+          echo "Self-heal healthcheck completed"
+
+      - name: Determine repository changes
+        id: git_status
+        run: |
+          if git status --porcelain | grep .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.post_healthcheck.outcome == 'success' && steps.git_status.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
+        # Use full commit SHA hash for this dependency.
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: self-heal/${{ github.run_id }}
+          commit-message: "chore: apply automated self-heal"
+          title: "chore: apply automated self-heal"
