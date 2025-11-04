@@ -16,20 +16,55 @@ jobs:
 
     steps:
       - name: Checkout repository
-        # Use full commit SHA hash for this dependency.
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configure Git user
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+
+      - name: Prepare log directory
+        run: mkdir -p logs
+
+      - name: Run pre-heal healthcheck
+        id: pre_healthcheck
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run post healthcheck tasks
+      - name: Execute self-heal routine
+        id: self_heal
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node scripts/self-heal.mjs | tee logs/self-heal.log
+
+      - name: Run post-heal healthcheck
         id: post_healthcheck
         run: |
-          echo "Self-heal healthcheck completed"
+          set -o pipefail
+          node scripts/healthcheck.mjs | tee logs/post-healthcheck.log
 
-      - name: Determine repository changes
+      - name: Upload self-heal logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-heal-logs
+          path: logs
+
+      - name: Detect repository changes
         id: git_status
         run: |
           if git status --porcelain | grep .; then
@@ -43,7 +78,7 @@ jobs:
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
         # Use full commit SHA hash for this dependency.
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SELF_HEAL_PAT }}
           branch: self-heal/${{ github.run_id }}
           commit-message: "chore: apply automated self-heal"
           title: "chore: apply automated self-heal"
