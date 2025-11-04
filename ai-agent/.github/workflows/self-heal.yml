@@ -16,6 +16,7 @@ jobs:
 
     steps:
       - name: Checkout repository
+        # Use full commit SHA hash for this dependency.
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
 
       - name: Configure Git user
