@@ -78,6 +78,17 @@ jobs:
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
         # Use full commit SHA hash for this dependency.
         with:
+          # SECURITY: Using SELF_HEAL_PAT instead of GITHUB_TOKEN because:
+          # - GITHUB_TOKEN cannot trigger workflows on PRs it creates (GitHub security restriction)
+          # - This prevents infinite loops but also prevents required CI checks from running
+          # - Self-heal PRs need CI validation before merge, requiring a PAT
+          #
+          # SELF_HEAL_PAT SECURITY REQUIREMENTS:
+          # - Scope: Minimal permissions - only 'contents:write' and 'pull-requests:write'
+          # - Storage: Must be stored as a GitHub repository secret with restricted access
+          # - Expiration: Must have an expiration policy (recommended: 90 days max)
+          # - Access: Limit to repository admins only
+          # - Rotation: Rotate regularly according to organization security policy
           token: ${{ secrets.SELF_HEAL_PAT }}
           branch: self-heal/${{ github.run_id }}
           commit-message: "chore: apply automated self-heal"
