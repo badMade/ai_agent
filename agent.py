@@ -531,7 +531,7 @@ class GeminiClient:
         for call, result in calls_and_results:
             parts.append(
                 {
-                    "functionResponse": {
+                    "function_response": {
                         "name": call["name"],
                         "response": result,
                     }
