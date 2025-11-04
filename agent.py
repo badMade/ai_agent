@@ -1,4 +1,5 @@
 """Minimal AI agent with pluggable LLM providers and a safe calculator tool."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,11 +9,21 @@ import math
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    cast,
+)
 
 try:
     from openai import OpenAI
-except ImportError as exc:  # pragma: no cover - handled at runtime
+except ImportError:  # pragma: no cover - handled at runtime
     OpenAI = None  # type: ignore
 
 try:
@@ -24,6 +35,9 @@ try:
     import google.generativeai as genai
 except ImportError:  # pragma: no cover - handled at runtime
     genai = None  # type: ignore
+
+if TYPE_CHECKING:
+    import google.generativeai as genai_module
 
 
 MAX_EXPRESSION_LENGTH = 256
@@ -68,7 +82,9 @@ class SafeEvaluator(ast.NodeVisitor):
 
     def visit_BinOp(self, node: ast.BinOp) -> Any:
         if not isinstance(node.op, self.allowed_bin_ops):
-            raise EvaluationError(f"Operator {type(node.op).__name__} not allowed")
+            raise EvaluationError(
+                f"Operator {type(node.op).__name__} not allowed"
+            )
         left = self.visit(node.left)
         right = self.visit(node.right)
         if isinstance(node.op, ast.Pow) and left == 0 and right < 0:
@@ -81,7 +97,9 @@ class SafeEvaluator(ast.NodeVisitor):
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
         if not isinstance(node.op, self.allowed_unary_ops):
-            raise EvaluationError(f"Operator {type(node.op).__name__} not allowed")
+            raise EvaluationError(
+                f"Operator {type(node.op).__name__} not allowed"
+            )
         operand = self.visit(node.operand)
         if isinstance(node.op, ast.UAdd):
             return +operand
@@ -110,7 +128,7 @@ class SafeEvaluator(ast.NodeVisitor):
         if isinstance(op, ast.Mod):
             return left % right
         if isinstance(op, ast.Pow):
-            return left ** right
+            return left**right
         raise EvaluationError("Unsupported operator")
 
 
@@ -204,12 +222,15 @@ class LLMClient(Protocol):
         model: str,
     ) -> Any:
         """Creates a model response."""
+        ...
 
     def extract_tool_calls(self, response: Any) -> List[Dict[str, Any]]:
         """Extracts tool calls from the response."""
+        ...
 
     def get_text(self, response: Any) -> Optional[str]:
         """Extracts primary text content from the response."""
+        ...
 
     def append_tool_results(
         self,
@@ -217,6 +238,7 @@ class LLMClient(Protocol):
         calls_and_results: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
         """Appends tool results to the message history."""
+        ...
 
 
 class OpenAIClient:
@@ -265,7 +287,10 @@ class OpenAIClient:
 
     @staticmethod
     def _transform_message(message: Dict[str, Any]) -> Dict[str, Any]:
-        payload = {"role": message.get("role"), "content": message.get("content")}
+        payload = {
+            "role": message.get("role"),
+            "content": message.get("content"),
+        }
         if message.get("tool_calls"):
             payload["tool_calls"] = [
                 {
@@ -308,7 +333,11 @@ class OpenAIClient:
         message = response.choices[0].message
         content = getattr(message, "content", None)
         if isinstance(content, list):
-            texts = [part.text for part in content if getattr(part, "type", "") == "text"]
+            texts = [
+                part.text
+                for part in content
+                if getattr(part, "type", "") == "text"
+            ]
             return "".join(texts) if texts else None
         return content or None
 
@@ -393,7 +422,11 @@ class AnthropicClient:
         return extracted
 
     def get_text(self, response: Any) -> Optional[str]:
-        texts = [block.text for block in response.content if getattr(block, "type", "") == "text"]
+        texts = [
+            block.text
+            for block in response.content
+            if getattr(block, "type", "") == "text"
+        ]
         return "".join(texts) if texts else None
 
     def append_tool_results(
@@ -417,13 +450,16 @@ class AnthropicClient:
 class GeminiClient:
     """Google Gemini function-calling client adapter."""
 
-    def __init__(self, system: Optional[str], tools: Sequence[Dict[str, Any]] | None) -> None:
+    def __init__(
+        self, system: Optional[str], tools: Sequence[Dict[str, Any]] | None
+    ) -> None:
         if genai is None:
             raise RuntimeError("google-generativeai package is not available")
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError("GOOGLE_API_KEY is not set")
-        genai.configure(api_key=api_key)
+        self._genai = cast("genai_module", genai)
+        self._genai.configure(api_key=api_key)
         self._system_instruction = system
         self._tools = tools
         self._model_cache: Dict[str, Any] = {}
@@ -444,7 +480,7 @@ class GeminiClient:
                         ]
                     }
                 ]
-            self._model_cache[model] = genai.GenerativeModel(
+            self._model_cache[model] = self._genai.GenerativeModel(
                 model_name=model,
                 tools=tool_declarations,
                 system_instruction=self._system_instruction,
@@ -489,16 +525,32 @@ class GeminiClient:
         for part in parts:
             function_call = None
             if isinstance(part, dict):
-                function_call = part.get("functionCall") or part.get("function_call")
+                function_call = part.get("functionCall") or part.get(
+                    "function_call"
+                )
             else:
-                function_call = getattr(part, "functionCall", None) or getattr(part, "function_call", None)
+                function_call = getattr(part, "functionCall", None) or getattr(
+                    part, "function_call", None
+                )
             if not function_call:
                 continue
-            call_id = function_call.get("id") if isinstance(function_call, dict) else None
+            call_id = (
+                function_call.get("id")
+                if isinstance(function_call, dict)
+                else None
+            )
             if not call_id:
                 call_id = str(uuid.uuid4())
-            name = function_call.get("name") if isinstance(function_call, dict) else getattr(function_call, "name", "")
-            args = function_call.get("args") if isinstance(function_call, dict) else getattr(function_call, "args", {})
+            name = (
+                function_call.get("name")
+                if isinstance(function_call, dict)
+                else getattr(function_call, "name", "")
+            )
+            args = (
+                function_call.get("args")
+                if isinstance(function_call, dict)
+                else getattr(function_call, "args", {})
+            )
             if args is None:
                 args = {}
             extracted.append({"id": call_id, "name": name, "args": dict(args)})
@@ -541,7 +593,9 @@ class GeminiClient:
         return messages
 
 
-DEFAULT_SYSTEM_PROMPT = "Think step-by-step. Use tools for math. Be concise. Don’t invent facts."
+DEFAULT_SYSTEM_PROMPT = (
+    "Think step-by-step. Use tools for math. Be concise. Don’t invent facts."
+)
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
@@ -563,11 +617,15 @@ class Agent:
         self.provider = provider
         self.model = model or DEFAULT_MODELS.get(provider, "")
         if not self.model:
-            raise ValueError(f"Unknown provider '{provider}' and no model specified")
+            raise ValueError(
+                f"Unknown provider '{provider}' and no model specified"
+            )
         self.temperature = temperature
         self.system_message = system_message or DEFAULT_SYSTEM_PROMPT
         self.tools = list(tools or [])
-        self.tool_map = {tool.get_schema()["name"]: tool for tool in self.tools}
+        self.tool_map = {
+            tool.get_schema()["name"]: tool for tool in self.tools
+        }
         self.messages: List[Dict[str, Any]] = []
         self.client = self._create_client()
 
@@ -577,7 +635,9 @@ class Agent:
         if self.provider == "anthropic":
             return AnthropicClient()
         if self.provider == "gemini":
-            return GeminiClient(self.system_message, [tool.get_schema() for tool in self.tools])
+            return GeminiClient(
+                self.system_message, [tool.get_schema() for tool in self.tools]
+            )
         raise ValueError(f"Unsupported provider: {self.provider}")
 
     def chat(self, user_content: Any) -> Any:
@@ -608,7 +668,9 @@ class Agent:
             content = getattr(message, "content", None)
             if isinstance(content, list):
                 text_content = "".join(
-                    part.text for part in content if getattr(part, "type", "") == "text"
+                    part.text
+                    for part in content
+                    if getattr(part, "type", "") == "text"
                 )
             else:
                 text_content = content or ""
@@ -621,7 +683,10 @@ class Agent:
                         "arguments": call.function.arguments,
                     }
                 )
-            stored_message: Dict[str, Any] = {"role": "assistant", "content": text_content}
+            stored_message: Dict[str, Any] = {
+                "role": "assistant",
+                "content": text_content,
+            }
             if tool_calls:
                 stored_message["tool_calls"] = tool_calls
             self.messages.append(stored_message)
@@ -657,7 +722,9 @@ class Agent:
                     text_attr = getattr(part, "text", None)
                     if text_attr is not None:
                         part_dict["text"] = str(text_attr)
-                    function_call = getattr(part, "functionCall", None) or getattr(part, "function_call", None)
+                    function_call = getattr(
+                        part, "functionCall", None
+                    ) or getattr(part, "function_call", None)
                     if function_call is not None:
                         if hasattr(function_call, "to_dict"):
                             part_dict["functionCall"] = function_call.to_dict()
@@ -667,12 +734,15 @@ class Agent:
                             fn_dict = {
                                 key: getattr(function_call, key)
                                 for key in dir(function_call)
-                                if not key.startswith("_") and not callable(getattr(function_call, key))
+                                if not key.startswith("_")
+                                and not callable(getattr(function_call, key))
                             }
                             part_dict["functionCall"] = fn_dict
                     if part_dict:
                         parts.append(part_dict)
-            self.messages.append({"role": "assistant", "content": parts or [{"text": ""}]})
+            self.messages.append(
+                {"role": "assistant", "content": parts or [{"text": ""}]}
+            )
         else:  # pragma: no cover - safety
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -769,7 +839,9 @@ def _run_demo(provider: str, prompt: str, **kwargs: Any) -> None:
 def main() -> None:
     """Entrypoint for the CLI interface."""
 
-    parser = argparse.ArgumentParser(description="Minimal multi-provider AI agent")
+    parser = argparse.ArgumentParser(
+        description="Minimal multi-provider AI agent"
+    )
     parser.add_argument("--ask", type=str, help="Prompt to send to the agent")
     parser.add_argument(
         "--provider",
