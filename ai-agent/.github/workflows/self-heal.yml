@@ -19,23 +19,59 @@ jobs:
         # Use full commit SHA hash for this dependency.
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
 
+      - name: Set up Node.js
+        # Use full commit SHA hash for this dependency.
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
       - name: Configure Git user
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run post healthcheck tasks
-        id: post_healthcheck
+      - name: Install dependencies
+        id: install_dependencies
+        continue-on-error: true
         run: |
-          echo "Self-heal healthcheck completed"
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
 
-      - name: Determine repository changes
+      - name: Execute self-heal routine
+        id: self_heal
+        continue-on-error: true
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          node scripts/self-heal.mjs | tee logs/self-heal.log
+
+      - name: Run post-heal healthcheck
+        id: post_healthcheck
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node scripts/healthcheck.mjs | tee logs/post-healthcheck.log
+
+      - name: Upload self-heal logs
+        if: always()
+        # Use full commit SHA hash for this dependency.
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3
+        with:
+          name: self-heal-logs
+          path: logs/
+          if-no-files-found: warn
+
+      - name: Detect repository changes
         id: git_status
         run: |
-          if git status --porcelain | grep .; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
+          if git diff --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Pull Request
@@ -43,7 +79,16 @@ jobs:
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
         # Use full commit SHA hash for this dependency.
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SELF_HEAL_PAT }}
           branch: self-heal/${{ github.run_id }}
           commit-message: "chore: apply automated self-heal"
           title: "chore: apply automated self-heal"
+          body: |
+            Automated self-heal workflow detected issues and applied fixes.
+
+            - Self-heal routine: ${{ steps.self_heal.outcome }}
+            - Post-heal healthcheck: ${{ steps.post_healthcheck.outcome }}
+
+            This PR was created automatically by the Self Heal workflow.
+          labels: automated,self-heal
+          delete-branch: true
