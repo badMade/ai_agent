@@ -31,7 +31,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Validate SELF_HEAL_PAT secret
+        run: |
+          if [ -z "${{ secrets.SELF_HEAL_PAT }}" ]; then
+            echo "::warning::SELF_HEAL_PAT secret is not configured. PR creation will be skipped."
+            echo "Please configure the SELF_HEAL_PAT secret in repository settings to enable automated PR creation."
+            echo "has_pat=false" >> "$GITHUB_ENV"
+          else
+            echo "has_pat=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Install dependencies
+        # package.json and scripts/ are at the repository root.
+        # The checkout action checks out the full repository, not just ai-agent/.
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -73,7 +85,7 @@ jobs:
           fi
 
       - name: Create Pull Request
-        if: steps.post_healthcheck.outcome == 'success'
+        if: steps.post_healthcheck.outcome == 'success' && env.has_pat == 'true'
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
         with:
           token: ${{ secrets.SELF_HEAL_PAT }}
