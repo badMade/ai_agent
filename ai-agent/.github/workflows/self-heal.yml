@@ -68,7 +68,7 @@ jobs:
       - name: Detect repository changes
         id: git_status
         run: |
-          if git diff --quiet HEAD; then
+          if git diff --quiet && git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
