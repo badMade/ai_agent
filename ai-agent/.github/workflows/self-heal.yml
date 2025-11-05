@@ -73,7 +73,7 @@ jobs:
           fi
 
       - name: Create Pull Request
-        if: steps.post_healthcheck.outcome == 'success' && steps.git_status.outputs.changed == 'true'
+        if: steps.post_healthcheck.outcome == 'success'
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
         with:
           token: ${{ secrets.SELF_HEAL_PAT }}
