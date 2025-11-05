@@ -29,7 +29,6 @@ jobs:
         uses: actions/setup-node@60b0f5ca8272004657dd0d22a6e1f885e077b1c6
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install dependencies
         run: |
@@ -37,6 +36,9 @@ jobs:
             npm ci
           elif [ -f package.json ]; then
             npm install
+          else
+            echo "No package.json found in repository root"
+            exit 1
           fi
 
       - name: Prepare log directory
