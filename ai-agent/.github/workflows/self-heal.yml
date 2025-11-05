@@ -32,6 +32,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        # package.json and scripts/ are located at the repository root
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -70,6 +71,15 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate SELF_HEAL_PAT secret
+        if: steps.post_healthcheck.outcome == 'success' && steps.git_status.outputs.changed == 'true'
+        run: |
+          if [ -z "${{ secrets.SELF_HEAL_PAT }}" ]; then
+            echo "Error: SELF_HEAL_PAT secret is not configured in repository settings"
+            echo "Please configure this secret to enable automated PR creation"
+            exit 1
           fi
 
       - name: Create Pull Request
