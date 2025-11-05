@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-import subprocess
+import compileall
 import sys
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
