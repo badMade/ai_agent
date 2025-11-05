@@ -19,18 +19,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f package.json ]; then
-            npm install
-          fi
+        if: ${{ hashFiles('requirements.txt') != '' }}
+        run: pip install -r requirements.txt
 
       - name: Prepare log directory
         run: mkdir -p logs
@@ -39,19 +35,19 @@ jobs:
         id: pre_healthcheck
         run: |
           set -o pipefail
-          node scripts/healthcheck.mjs | tee logs/pre-healthcheck.log
+          python scripts/healthcheck.py | tee logs/pre-healthcheck.log
 
       - name: Execute self-heal routine
         id: self_heal
         run: |
           set -o pipefail
-          node scripts/self-heal.mjs | tee logs/self-heal.log
+          python scripts/self_heal.py | tee logs/self-heal.log
 
       - name: Run post-heal healthcheck
         id: post_healthcheck
         run: |
           set -o pipefail
-          node scripts/healthcheck.mjs | tee logs/post-healthcheck.log
+          python scripts/healthcheck.py | tee logs/post-healthcheck.log
 
       - name: Collect logs
         if: always()
