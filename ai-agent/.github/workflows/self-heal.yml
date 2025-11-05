@@ -9,9 +9,6 @@ jobs:
   self-heal:
     name: Run automated self-heal
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ai-agent
     permissions:
       contents: write
       pull-requests: write
