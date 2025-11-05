@@ -72,6 +72,14 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Validate SELF_HEAL_PAT secret
+        if: steps.post_healthcheck.outcome == 'success'
+        run: |
+          if [ -z "${{ secrets.SELF_HEAL_PAT }}" ]; then
+            echo "::error::SELF_HEAL_PAT secret is not configured. Please add it to repository secrets to enable PR creation."
+            exit 1
+          fi
+
       - name: Create Pull Request
         if: steps.post_healthcheck.outcome == 'success'
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c
